@@ -9,21 +9,21 @@ class SaladMakingEnv(Env):
         super(SaladMakingEnv, self).__init__()
         
         # Define action space: Measure, Clean, Cut, Mix, Add Dressing, Serve, Clarify, Substitute
-        self.action_space = spaces.Discrete(8)
+        self.action_space = spaces.Discrete(6)
         
         # Define state space: 10 possible states in the salad-making process
-        self.observation_space = spaces.Discrete(10)
+        self.observation_space = spaces.Discrete(8)
         
         # State mapping
         self.states = [
             "Start", "Measuring", "Cleaning", "Cutting", "Mixing", 
-            "Dressing", "Serving", "Task Complete", "Clarification", "Substitute"
+            "Dressing", "Serving", "Task Complete"
         ]
         
         # Actions mapping
         self.actions = [
             "Measure", "Clean", "Cut", "Mix", "Add Dressing", 
-            "Serve", "Clarify", "Substitute"
+            "Serve", "Invalid"
         ]
         
         # Initial state
@@ -33,20 +33,18 @@ class SaladMakingEnv(Env):
         self.rewards = {
             "Measure": 10, "Clean": 10, "Cut": 10, 
             "Mix": 10, "Add Dressing": 10, "Serve": 100,
-            "Clarify": 0, "Substitute": 0, "Invalid": -10
+            "Invalid": -10
         }
         
         # Transition mapping
         self.transitions = {
-            0: {"Measure": 1, "Clarify": 8}, # Start -> Measuring or Clarification
-            1: {"Clean": 2, "Clarify": 8},   # Measuring -> Cleaning or Clarification
-            2: {"Cut": 3, "Clarify": 8},     # Cleaning -> Cutting or Clarification
-            3: {"Mix": 4, "Clarify": 8},     # Cutting -> Mixing or Clarification
-            4: {"Add Dressing": 5, "Clarify": 8},  # Mixing -> Dressing or Clarification
-            5: {"Serve": 6, "Clarify": 8},   # Dressing -> Serving or Clarification
+            0: {"Measure": 1}, # Start -> Measuring or Clarification
+            1: {"Clean": 2},   # Measuring -> Cleaning or Clarification
+            2: {"Cut": 3},     # Cleaning -> Cutting or Clarification
+            3: {"Mix": 4},     # Cutting -> Mixing or Clarification
+            4: {"Add Dressing": 5},  # Mixing -> Dressing or Clarification
+            5: {"Serve": 6},   # Dressing -> Serving or Clarification
             6: {"Complete": 7},              # Serving -> Task Complete
-            8: {"Substitute": 9, "Measure": 1}, # Clarification -> Substitute or back to Measuring
-            9: {"Measure": 1}                # Substitute -> Measuring
         }
 
     def step(self, action):

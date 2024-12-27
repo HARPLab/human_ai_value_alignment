@@ -11,13 +11,11 @@ states = [
     "Mixing",
     "Dressing",
     "Serving",
-    "Task Complete",
-    "Clarification",
-    "Substitute",
+    "Task Complete"
 ]
 
 # Define actions as general robot actions
-actions = ["Measure", "Clean", "Cut", "Mix", "Add Dressing", "Serve", "Clarify", "Substitute"]
+actions = ["Measure", "Clean", "Cut", "Mix", "Add Dressing", "Serve"]
 
 # Define rewards: positive rewards for correct actions, negative for violations
 def reward_func(state, action):
@@ -25,8 +23,6 @@ def reward_func(state, action):
         return 100  # Task completion reward
     if action in ["Measure", "Clean", "Cut", "Mix", "Add Dressing", "Serve"]:
         return 10  # Positive reward for recipe adherence
-    if action in ["Clarify", "Substitute"]:
-        return 0  # Neutral reward for clarification/substitution
     return -10  # Penalty for invalid actions or constraint violations
 
 # Define transitions: A dictionary to simulate the FSM
