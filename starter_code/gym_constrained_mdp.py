@@ -32,11 +32,10 @@ class Ingredient:
             return "invalid"
         
     def apply_ingredient_effects(self):
-        if ingredient.requested_quantity <= ingredient.available_quantity:
-            ingredient.available_quantity -= ingredient.requested_quantity
-            self.calorie_count += ingredient.requested_quantity * ingredient.calories_per_unit
+        if self.requested_quantity <= self.available_quantity:
+            self.available_quantity -= self.requested_quantity
         else:
-            self.violations["availability"][ingredient.name] += ingredient.requested_quantity - ingredient.available_quantity
+            raise ValueError(f"Not enough {self.name} available")
 
     def is_ready(self):
         # Returns True if all steps are completed
@@ -202,7 +201,7 @@ class SaladMakingEnv(Env):
         # Reset state
         self.ingredients = self.initialize_ingredients()
         self.calorie_count = 0
-        self.violations = {"calories": 0, "allergies": [], "availability": []}
+        self.violations = {"calories": 0, "allergies": [], "availability": {}}
         self.current_step = 0
         return self.get_observation()
     
