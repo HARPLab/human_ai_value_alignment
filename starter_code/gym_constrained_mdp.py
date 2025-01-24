@@ -5,7 +5,7 @@ import numpy as np
 
 
 class Ingredient:
-    def __init__(self, name, available_quantity, dietary_restrictions=None):
+    def __init__(self, name, available_quantity, calories, dietary_restrictions=None):
         self.name = name
         self.available_quantity = available_quantity
         self.state = "raw"
@@ -17,10 +17,13 @@ class Ingredient:
         self.prep_step = 0
         self.requested_quantity = 0
         self.prep_flow = []
+        self.calories = calories
 
     def update_state(self, action):
         # Check if the action is valid for the current step
         current_action_key = list(self.possible_actions.keys())[self.prep_step]
+        #print(f"current action key: {current_action_key}")
+        #print(f"possible actions: {self.possible_actions[current_action_key]}")
         if action in self.possible_actions[current_action_key]:
             if action == "Measure":
                 self.apply_ingredient_effects()
@@ -42,35 +45,32 @@ class Ingredient:
         return self.prep_step >= len(self.prep_flow)
 
 class Vegetable(Ingredient):
-    def __init__(self, name, quantity, dietary_restrictions=None):
-        super().__init__(name, quantity, dietary_restrictions)
+    def __init__(self, name, quantity, calories, dietary_restrictions=None):
+        super().__init__(name, quantity, calories, dietary_restrictions)
         self.possible_actions.update({
             "Wash": ["Wash"],
             "Prepare": ["Chop", "Dice", "Shred"]
         })
 
 class Dressing(Ingredient):
-    def __init__(self, name, quantity, dietary_restrictions=None):
-        super().__init__(name, quantity, dietary_restrictions)
-        self.possible_actions.update({
-            "Pour": ["Pour"]
-        })
+    def __init__(self, name, quantity, calories, dietary_restrictions=None):
+        super().__init__(name, quantity, calories, dietary_restrictions)
 
 class Nuts(Ingredient):
-    def __init__(self, name, quantity, dietary_restrictions=None):
-        super().__init__(name, quantity, dietary_restrictions)
+    def __init__(self, name, quantity, calories, dietary_restrictions=None):
+        super().__init__(name, quantity, calories, dietary_restrictions)
         self.possible_actions.update({
             "Prepare": ["Crush", "Dice", "Grind"],
             "Roast": ["Roast"]
         })
 
 AVAILABLE_INGREDIENTS = {
-    "tomato": Vegetable("tomato", 2, [], 20),
-    "carrot": Vegetable("carrot", 3, [], 25), 
-    "lettuce": Vegetable("lettuce", 2, [], 10), 
-    "spinach": Vegetable("spinach", 3, [], 15), 
-    "almonds": Nuts("almonds", 100, ["nut"], 50), 
-    "sesame_dressing": Dressing("sesame_dressing", 100, [], 60),
+    "tomato": Vegetable("tomato", 2, 20, []),
+    "carrot": Vegetable("carrot", 3, 25, []), 
+    "lettuce": Vegetable("lettuce", 2, 10, []), 
+    "spinach": Vegetable("spinach", 3, 15, []), 
+    "almonds": Nuts("almonds", 100, 50, ["nut"]), 
+    "sesame_dressing": Dressing("sesame_dressing", 100, 60, []),
 }
 
 class SaladMakingEnv(Env):
@@ -78,11 +78,11 @@ class SaladMakingEnv(Env):
         super(SaladMakingEnv, self).__init__()
         self.recipe = recipe
         self.constraints = constraints
-        self.ingredients = self.initialize_ingredients()
         self.calorie_count = 0
         self.violations = {"calories": 0, "allergies": [], "availability": {}} # how many calories are we over/ under by, which allergies are violated, which ingredients are unavailable
         self.current_step = 0  
         self.step_order = ["Vegetables", "Dressing", "Nuts", "Mix", "Serve"]
+        self.ingredients = self.initialize_ingredients()
     
     def initialize_ingredients(self):
         ingredients = {}
@@ -105,7 +105,7 @@ class SaladMakingEnv(Env):
             # Set Preparation flow based on ingredient type
             prep_method = details.get("prep_method")
             if prep_method:
-                if "Prepare" in ingredient.possible_actions.keys:
+                if "Prepare" in ingredient.possible_actions.keys():
                     if prep_method not in ingredient.possible_actions['Prepare']:
                         raise ValueError(f"Invalid prep method '{prep_method}' for ingredient: '{ingredient_name}'")
                 
@@ -120,7 +120,7 @@ class SaladMakingEnv(Env):
                 elif isinstance(ingredient, Nuts):
                     ingredient.prep_flow = ["Measure", "Roast", "Combine"]
                 elif isinstance(ingredient, Dressing):
-                    ingredient.prep_flow = ["Measure", "Pour", "Combine"]
+                    ingredient.prep_flow = ["Measure", "Combine"]
 
             ingredients[ingredient_name] = ingredient
 
@@ -132,18 +132,24 @@ class SaladMakingEnv(Env):
 
         current_stage_data = self.get_stage()
         stage = current_stage_data["stage"]
-        ingredient_name = current_stage_data.get("ingredient")
 
-        if stage in ["Vegetable", "Dressing", "Nuts"]:
+        if stage in ["Vegetables", "Dressing", "Nuts"]:
+            ingredient_name = current_stage_data.get("ingredient")
             ingredient = self.ingredients[ingredient_name]
             result = ingredient.update_state(action)
 
             if result == "success":
                 reward += 10
                 if ingredient.is_ready():
+                    self.calorie_count += ingredient.requested_quantity * ingredient.calories
                     self.current_step += 1
             else:
                 reward -= 5
+                self.current_step += 1
+
+            self.check_constraints(ingredient)
+            if self.violations["calories"] > 0 or len(self.violations["allergies"]) > 0 or len(self.violations["availability"].keys()) > 0:
+                reward -= 10
         
         elif stage == "Mix":
             if action == "Mix":
@@ -159,15 +165,12 @@ class SaladMakingEnv(Env):
             else:
                 reward -= 5
 
-        self.check_constraints()
-        if self.violations["calories"] > 0 or self.violations["allergies"] > 0 or self.violations["availability"] > 0:
-            reward -= 10
 
         # Determine if the MDP is complete
         if self.current_step >= len(self.ingredients) + len(self.step_order):
             done = True
 
-        return self._get_observation(), reward, done, {"violations": self.violations}
+        return self.get_observation(), reward, done, {"violations": self.violations}
 
     def get_stage(self):
         if self.current_step < len(self.ingredients):
@@ -242,14 +245,26 @@ obs = env.reset()
 
 done = False
 while not done:
-    for ingredient_name, details in recipe.items():
+    current_stage = obs["current_stage"]
+    stage = current_stage["stage"]
+
+    if stage in ["Vegetables", "Dressing", "Nuts"]:
+        ingredient_name = current_stage.get("ingredient")
         ingredient = env.ingredients[ingredient_name]
+
+        # Loop through preparation actions for the current ingredient
         while not ingredient.is_ready():
-            try:
-                current_action_key = list(ingredient.possible_actions.keys())[ingredient.current_step]
-                action = ingredient.possible_actions[current_action_key][0]
-                obs, reward, done, info = env.step(action)
-                print(f"Processed {ingredient_name}: {action}, Reward: {reward}")
-            except IndexError:
-                break
+            current_action_key = list(ingredient.possible_actions.keys())[ingredient.prep_step]
+            action = ingredient.possible_actions[current_action_key][0]
+            obs, reward, done, info = env.step(action)
+            print(f"Processed {ingredient_name}: {action}, Reward: {reward}")
+
+    elif stage == "Mix":
+        obs, reward, done, info = env.step("Mix")
+        print(f"Mixing: Reward: {reward}")
+
+    elif stage == "Serve":
+        obs, reward, done, info = env.step("Serve")
+        print(f"Serving: Reward: {reward}")
+
     print(f"Violations: {info['violations']}")
