@@ -5,7 +5,7 @@ import numpy as np
 
 
 class Ingredient:
-    def __init__(self, name, available_quantity, calories, dietary_restrictions=None):
+    def __init__(self, name, available_quantity, calories, dietary_restrictions=[]):
         self.name = name
         self.available_quantity = available_quantity
         self.state = "raw"
@@ -25,6 +25,7 @@ class Ingredient:
         #print(f"current action key: {current_action_key}")
         #print(f"possible actions: {self.possible_actions[current_action_key]}")
         if action in self.possible_actions[current_action_key]:
+            # if action in self.prep_flow[self.prep_step]:
             if action == "Measure":
                 self.apply_ingredient_effects()
             self.state = action.lower()
@@ -143,14 +144,18 @@ class SaladMakingEnv(Env):
                 if ingredient.is_ready():
                     self.calorie_count += ingredient.requested_quantity * ingredient.calories
                     self.current_step += 1
+
+                    violations_by_ing = self.check_constraints(ingredient)
+                    if violations_by_ing > 0:
+                        reward -= (2*violations_by_ing)
             else:
                 reward -= 5
                 self.current_step += 1
 
-            self.check_constraints(ingredient)
-            if self.violations["calories"] > 0 or len(self.violations["allergies"]) > 0 or len(self.violations["availability"].keys()) > 0:
-                reward -= 10
-        
+                violations_by_ing = self.check_constraints(ingredient)
+                if violations_by_ing > 0:
+                    reward -= (2*violations_by_ing)
+
         elif stage == "Mix":
             if action == "Mix":
                 reward += 10
@@ -216,13 +221,18 @@ class SaladMakingEnv(Env):
         }
 
     def check_constraints(self, ingredient):
+        constraints_violated = 0
         if self.calorie_count > self.constraints["calories"]:
-            self.violations["calories"] += 1
+            self.violations["calories"] = self.calorie_count - self.constraints["calories"]
+            constraints_violated +=1
 
-        for ingredient in self.ingredients.values():
-            for restriction in ingredient.dietary_restrictions:
-                if restriction in self.constraints["allergies"]:
-                    self.violations["allergies"] += restriction
+        for restriction in ingredient.dietary_restrictions:
+            if restriction in self.constraints["allergies"]:
+                print(restriction)
+                self.violations["allergies"].append(restriction) 
+                constraints_violated += 1
+        return constraints_violated
+    
     
 
 recipe = {
@@ -237,7 +247,7 @@ recipe = {
 
 constraints = {
     "calories": 300,
-    "allergies": ["peanut"]
+    "allergies": ["nut"]
 }
 
 env = SaladMakingEnv(recipe, constraints)
@@ -257,14 +267,14 @@ while not done:
             current_action_key = list(ingredient.possible_actions.keys())[ingredient.prep_step]
             action = ingredient.possible_actions[current_action_key][0]
             obs, reward, done, info = env.step(action)
-            print(f"Processed {ingredient_name}: {action}, Reward: {reward}")
+            print(f"\nProcessed {ingredient_name}: {action}, Reward: {reward}, {info}")
 
     elif stage == "Mix":
         obs, reward, done, info = env.step("Mix")
-        print(f"Mixing: Reward: {reward}")
+        print(f"\nMixing: Reward: {reward}")
 
     elif stage == "Serve":
         obs, reward, done, info = env.step("Serve")
-        print(f"Serving: Reward: {reward}")
+        print(f"\nServing: Reward: {reward}")
 
-    print(f"Violations: {info['violations']}")
+    #print(f"Violations: {info['violations']}")
