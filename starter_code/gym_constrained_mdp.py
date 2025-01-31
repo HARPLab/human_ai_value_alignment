@@ -99,6 +99,7 @@ class SaladMakingEnv(Env):
                 # Get the ingredient from the available bank
                 ingredient = AVAILABLE_INGREDIENTS[ingredient_name]
                 ingredient.requested_quantity = details.get("quantity", 0)
+                print()
                 
             # Check availability
             if ingredient.requested_quantity > ingredient.available_quantity:
