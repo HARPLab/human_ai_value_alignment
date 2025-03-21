@@ -4,7 +4,33 @@ import numpy as np
 import random
 
 
-class SaladEnv(Env):
+# constraints we want to manage: skill limitation, time limitation, calorie, availability, allergies 
+
+AVAILABLE_INGREDIENTS = {
+    "tomato": {"type": "Vegetable", "calories": 20, "quantity": 3, "allergy": {"tomato"}}, 
+    "carrot": {"type": "Vegetable", "calories": 15, "quantity": 2, "allergy": {"carrot"}}, 
+    "lettuce": {"type": "Vegetable", "calories": 10, "quantity": 1, "allergy": {"lettuce"}}, 
+    "spinach": {"type": "Vegetable", "calories": 12, "quantity": 2, "allergy": {"spinach"}}, 
+    "almonds": {"type": "Nuts", "calories": 20, "quantity": 100, "allergy": {"almond", "nuts"}}, 
+    "sesame_dressing": {"type": "Dressing", "calories": 30, "quantity": 100, "allergy": {"sesame"}},
+    "peanuts": {"type": "Nuts", "calories": 20, "quantity": 100, "allergy": {"peanut", "nuts"}}
+}
+
+AVAILABLE_INGREDIENTS = {
+    "tomato": {"type": "Vegetable", "calories": 20, "quantity": 3, "allergy": {"tomato"}}, 
+    "carrot": {"type": "Vegetable", "calories": 15, "quantity": 2, "allergy": {"carrot"}}, 
+    "lettuce": {"type": "Vegetable", "calories": 10, "quantity": 1, "allergy": {"lettuce"}}, 
+    "spinach": {"type": "Vegetable", "calories": 12, "quantity": 2, "allergy": {"spinach"}}, 
+    "almonds": {"type": "Nuts", "calories": 50, "quantity": 100, "allergy": {"almond", "nuts"}}, 
+    "sesame_dressing": {"type": "Dressing", "calories": 30, "quantity": 100, "allergy": {"sesame"}},
+    "peanuts": {"type": "Nuts", "calories": 60, "quantity": 100, "allergy": {"peanut", "nuts"}}, 
+    "cucumber": {"type": "Vegetable", "calories": 10, "quantity": 2,  "allergy": {"cucumber"}}, 
+    "onion": {"type": "Vegetable", "calories": 15, "quantity": 2, "allergy": {"onion"}},
+    "cheese": {"type": "Dairy", "calories": 90, "quantity": 50, "allergy": {"cheese", "dairy"}},
+    "croutons": {"type": "Grain", "calories": 80, "quantity": 20, "allergy": {"croutons", "gluten"}}
+}
+
+class SaladEnv(Env): 
     def __init__(self, recipe, constraints):
         super(SaladEnv, self).__init__()
 
@@ -23,7 +49,11 @@ class SaladEnv(Env):
         self.action_space = Discrete(len(self.action_map))
         self.state_space = len(recipe.keys()) * len(self.action_map)
         self.observation_space = Discrete(self.state_space)
+        self.completed_ingredients = set()
+        self.warnings = []
 
+        self.current_calories = 0
+        self.available_ingredients = AVAILABLE_INGREDIENTS
         self.reset()
         
  
@@ -42,13 +72,18 @@ class SaladEnv(Env):
             print(f"Actions Taken: {self.state['actions_taken']}")
             self.state = self.set_next_ingredient()
 
-        return self.encode_state(), reward, self.done, {}
+        return self.encode_state(), reward, self.done, {"warnings": self.warnings, "violations": self.violations}
 
     def calculate_reward(self, action_name):
         reward = 0
         previous_actions = self.state["actions_taken"]
         ingredient_type = self.state["type"]
         correct_prep_method = self.state["prep_method"]
+        ingredient_name = self.state["ingredient"]
+
+        # Prevent using unavailable ingredients
+        if not self.available_ingredients.get(ingredient_name, True):
+            return -500
 
         # Ensure first action is "Measure"
         if len(previous_actions) == 0:
@@ -68,11 +103,11 @@ class SaladEnv(Env):
         if action_name == "Roast":
             if ingredient_type == "Nuts":
                 if any(act in previous_actions for act in {"Grind", "Crush", "Dice"}):
-                    reward += 100  # Encourage roasting after processing
-                elif "Roast" not in previous_actions:
                     reward += 75  # Normal reward for roasting
+                elif "Roast" not in previous_actions:
+                    reward += 125  # Encourage roasting before processing
                 else:
-                    reward -= 25  # Small penalty for repeating roast
+                    reward -= 10  # Small penalty for repeating roast
             else:
                 reward -= 100  # Harsh penalty for roasting non-nuts
 
@@ -84,9 +119,9 @@ class SaladEnv(Env):
         # Reward correct processing action
         if action_name in {"Chop", "Dice", "Shred", "Crush", "Grind"}:
             if action_name == correct_prep_method:
-                reward += 75  # Correct method
+                reward += 75  
             else:
-                reward -= 50  # Wrong method
+                reward -= 50  
 
         # Penalize repeating an action but not too harshly
         if action_name in previous_actions:
@@ -98,7 +133,30 @@ class SaladEnv(Env):
 
         # Ensure "Roast" happens for nuts
         if ingredient_type == "Nuts" and action_name == "Roast":
-            reward += 50 if "Roast" not in previous_actions else -25
+            reward += 75 if "Roast" not in previous_actions else -25
+
+        # Calorie constraint tracking
+        ingredient_calories = self.available_ingredients[ingredient_name].get("calories", 0)
+        self.current_calories += ingredient_calories  # Track total calories
+
+        calorie_limit = self.constraints.get("calories", float("inf"))
+        if self.current_calories > calorie_limit:
+            overshoot = self.current_calories - calorie_limit
+            self.violations["calories"] = overshoot  # Log the violation
+            #reward -= 50 + (overshoot * 5)  # Scale penalty based on overshoot
+            self.warnings.append(f"Warning: Calorie limit exceeded by {overshoot} calories!")
+
+        # Allergy Constraint Handling
+        if ingredient_name in self.available_ingredients:
+            allergens = self.available_ingredients[ingredient_name].get("allergy", set())
+            user_allergies = set(self.constraints.get("allergies", []))
+            
+            if allergens & user_allergies:  # Intersection means violation
+                if ingredient_name not in self.violations["allergies"]:
+                    self.violations["allergies"].append(ingredient_name)  # Log violation
+                #reward -= 100  # Apply penalty
+                self.warnings.append(f"Warning: Allergy violation! {ingredient_name} contains allergens: {allergens & user_allergies}")
+
 
         # Reward completing ingredient correctly
         if action_name == "Combine" and set(previous_actions) >= self.get_required_actions():
@@ -144,8 +202,10 @@ class SaladEnv(Env):
     def reset(self):
         self.completed_ingredients = set()
         self.done = False
-        self.current_ingredient = None
+        self.current_calories = 0
+        self.warnings = []  # Reset warnings to avoid accumulation
         self.state = self.set_next_ingredient()
+        self.available_ingredients = AVAILABLE_INGREDIENTS
         return self.encode_state()
     
 # Training parameters
@@ -170,7 +230,7 @@ def train_agent(env, episodes=EPISODES):
             else:
                 action = np.argmax(Q[state, :])
             
-            next_state, reward, done, _ = env.step(action)
+            next_state, reward, done, info = env.step(action)
             
             # Q-learning update
             Q[state, action] = Q[state, action] + LEARNING_RATE * (
@@ -188,14 +248,15 @@ def train_agent(env, episodes=EPISODES):
 
 # Example usage
 recipe = {
-    "tomato": {"type": "Vegetable", "prep_method": "Dice"},
-    "almonds": {"type": "Nuts", "prep_method": "Grind"},
-    "sesame_dressing": {"type": "Dressing", "prep_method": None}
+    "tomato": {"type": "Vegetable", "prep_method": "Dice", "quantity": 2},
+    "almonds": {"type": "Nuts", "prep_method": "Grind", "quantity": 10},
+    "sesame_dressing": {"type": "Dressing", "prep_method": None, "quantity": 1},
+    "peanuts" : {"type": "Nuts", "prep_method": "Grind", "quantity": 10},
 }
 
 constraints = {
     "calories": 300,
-    "allergies": ["nuts"]
+    "allergies": ["peanut"]
 }
 
 env = SaladEnv(recipe, constraints)
@@ -207,13 +268,34 @@ def test_policy(env, Q_table):
     state = env.reset()
     done = False
     total_reward = 0
+    episode_warnings= []
     
     while not done:
         action = np.argmax(Q_table[state, :])
-        state, reward, done, _ = env.step(action)
+        state, reward, done, info = env.step(action)
         total_reward += reward
+
+        if "warnings" in info:
+            episode_warnings.extend(info["warnings"])
         
+    if episode_warnings:
+        print("\n⚠️ Warnings:")
+        for warning in set(episode_warnings):
+            print(f" - {warning}")
+    else:
+        print("\n No warnings issued!")
+
+    print("\n Violations:")
+    for key, value in env.violations.items():
+        if isinstance(value, list) and value:
+            print(f" - {key.capitalize()}: {', '.join(value)}")
+        elif isinstance(value, dict) and value:
+            print(f" - {key.capitalize()}: {value}")
+        elif value:
+            print(f" - {key.capitalize()}: {value}")
+
     print(f"\nTotal reward: {total_reward}")
+
 
 test_policy(env, Q_table)
 
