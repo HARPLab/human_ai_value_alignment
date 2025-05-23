@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from updated_mdp import SaladEnv, train_agent
+from updated_mdp import SaladEnv, train_agent, test_policy
+import pickle
+
+with open("trained_q_table.pkl", "rb") as f:
+    Q_table = pickle.load(f)
 
 # Multiple test recipes
 TEST_RECIPES = [
@@ -51,7 +55,6 @@ for i, test_case in enumerate(TEST_RECIPES):
 
     print(f"\nTraining on Recipe {i+1} with constraints {constraints}")
     env = SaladEnv(recipe, constraints)
-    Q_table = train_agent(env)
     print("\nTraining Done!\n")
 
     rewards = []

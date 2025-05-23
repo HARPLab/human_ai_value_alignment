@@ -2,19 +2,9 @@ from gym import Env
 from gym.spaces import Discrete, Dict
 import numpy as np
 import random
-
+import pickle
 
 # constraints we want to manage: skill limitation, time limitation, calorie, availability, allergies 
-
-AVAILABLE_INGREDIENTS = {
-    "tomato": {"type": "Vegetable", "calories": 20, "quantity": 3, "allergy": {"tomato"}}, 
-    "carrot": {"type": "Vegetable", "calories": 15, "quantity": 2, "allergy": {"carrot"}}, 
-    "lettuce": {"type": "Vegetable", "calories": 10, "quantity": 1, "allergy": {"lettuce"}}, 
-    "spinach": {"type": "Vegetable", "calories": 12, "quantity": 2, "allergy": {"spinach"}}, 
-    "almonds": {"type": "Nuts", "calories": 20, "quantity": 100, "allergy": {"almond", "nuts"}}, 
-    "sesame_dressing": {"type": "Dressing", "calories": 30, "quantity": 100, "allergy": {"sesame"}},
-    "peanuts": {"type": "Nuts", "calories": 20, "quantity": 100, "allergy": {"peanut", "nuts"}}
-}
 
 AVAILABLE_INGREDIENTS = {
     "tomato": {"type": "Vegetable", "calories": 20, "quantity": 3, "allergy": {"tomato"}}, 
@@ -88,10 +78,6 @@ class SaladEnv(Env):
         # Ensure first action is "Measure"
         if len(previous_actions) == 0:
             return 100 if action_name == "Measure" else -100
-
-        # Prevent actions before measuring
-        if "Measure" not in previous_actions:
-            return -50
         
         # Ensure only vegetables are washed
         if action_name == "Wash":
@@ -126,14 +112,6 @@ class SaladEnv(Env):
         # Penalize repeating an action but not too harshly
         if action_name in previous_actions:
             reward -= 50  
-
-        # Ensure "Wash" happens for vegetables
-        if ingredient_type == "Vegetable" and action_name == "Wash":
-            reward += 50 if "Wash" not in previous_actions else -25
-
-        # Ensure "Roast" happens for nuts
-        if ingredient_type == "Nuts" and action_name == "Roast":
-            reward += 75 if "Roast" not in previous_actions else -25
 
         # Calorie constraint tracking
         ingredient_calories = self.available_ingredients[ingredient_name].get("calories", 0)
@@ -172,13 +150,31 @@ class SaladEnv(Env):
             required.add("Roast")
         return required
     
-    def encode_state(self):
+    '''def encode_state(self):
         ingredient_index = list(self.recipe.keys()).index(self.current_ingredient)
         
         # Convert action history to binary vector (0 if not taken, 1 if taken)
         action_vector = [1 if action in self.state["actions_taken"] else 0 for action in self.action_map.values()]
         
-        return ingredient_index * len(self.action_map) + int("".join(map(str, action_vector)), 2)
+        return ingredient_index * len(self.action_map) + int("".join(map(str, action_vector)), 2)'''
+    
+    def encode_state(self):
+        # Get the index of the current ingredient in the recipe's ingredient list
+        ingredient_index = list(self.recipe.keys()).index(self.current_ingredient)
+
+        # Create a binary vector representing which actions have been taken for the current ingredient
+        # 1 if the action has been taken, 0 otherwise
+        action_vector = [1 if action in self.state["actions_taken"] else 0 for action in self.action_map.values()]
+
+        # Convert the binary vector (e.g., [0, 1, 1, 0, 0, 0, 1, 0, 0]) to an integer
+        # First join it into a string like "011000100", then convert from binary to integer (e.g., 100)
+        action_bits = int("".join(map(str, action_vector)), 2)
+
+        #Encode the overall state as a unique integer:
+        # Shift the ingredient's action space by a block of 512 (2^9) to avoid overlaps between ingredients
+        # Final state = base offset for ingredient + unique action vector for this ingredient
+        return ingredient_index * (2 ** len(self.action_map)) + action_bits
+
 
     def set_next_ingredient(self):
         remaining_ingredients = [i for i in self.recipe.keys() if i not in self.completed_ingredients]
@@ -261,6 +257,13 @@ constraints = {
 
 env = SaladEnv(recipe, constraints)
 Q_table = train_agent(env)
+
+# Save the Q-table
+with open("trained_q_table.pkl", "wb") as f:
+    pickle.dump(Q_table, f)
+
+print("\nTraining Done! Q-table saved.\n")
+
 print("\nTraining Done!\n")
 
 # Test the trained policy
